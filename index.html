@@ -32,11 +32,11 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: rgba(5, 8, 17, 0.75);
+      background: rgba(5, 8, 17, 0.85);
       backdrop-filter: blur(4px);
     }
     #start-screen {
-      background: linear-gradient(rgba(5, 8, 17, 0.6), rgba(5, 8, 17, 0.8)), url('start_bg.jpg') center/cover no-repeat;
+      background: linear-gradient(rgba(5, 8, 17, 0.8), rgba(5, 8, 17, 0.95)), url('start_bg.jpg') center/cover no-repeat;
     }
     h1 {
       font-size: 38px;
@@ -107,71 +107,182 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// Carga de imágenes
+// Imagen de fondo del nivel (Opcional, si no está usa un fondo generado)
 const bgLevel = new Image();
 bgLevel.src = 'level_bg.jpg';
 
-// Función para remover el fondo blanco de una imagen JPG
-function removeWhiteBackground(imageSrc, callback) {
-  const rawImg = new Image();
-  rawImg.crossOrigin = "Anonymous";
-  rawImg.src = imageSrc;
-  rawImg.onload = () => {
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = rawImg.width;
-    tempCanvas.height = rawImg.height;
-    const tempCtx = tempCanvas.getContext("2d");
-    tempCtx.drawImage(rawImg, 0, 0);
-
-    const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-    const data = imgData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      // Si el píxel es blanco o casi blanco, lo volvemos 100% transparente
-      if (r > 220 && g > 220 && b > 220) {
-        data[i + 3] = 0;
-      }
-    }
-    tempCtx.putImageData(imgData, 0, 0);
-
-    const cleanImg = new Image();
-    cleanImg.src = tempCanvas.toDataURL();
-    cleanImg.onload = () => callback(cleanImg);
-  };
-  rawImg.onerror = () => {
-    console.warn("No se pudo cargar la imagen:", imageSrc);
-  };
-}
-
-let playerSprite = null;
-let bossSprite = null;
-
-// Procesamos las imágenes para quitarles el fondo blanco al iniciar
-removeWhiteBackground('player.jpg', img => playerSprite = img);
-removeWhiteBackground('boss.jpg', img => bossSprite = img);
-
 let gameState = "MENU";
 let currentLevel = 1;
+let gameTick = 0;
 
 const keys = {};
 window.addEventListener("keydown", e => keys[e.code] = true);
 window.addEventListener("keyup", e => keys[e.code] = false);
 
+// --- MOTOR DE SPRITES POR CÓDIGO ---
+
+const SpritePainter = {
+  // Dibuja al Jugador detallado y animado
+  drawPlayer(ctx, x, y, w, h, vx, vy, grounded, attacking, attackTimer, facing, frame) {
+    ctx.save();
+    ctx.translate(x + w/2, y + h/2);
+    ctx.scale(facing, 1);
+
+    // Colores base
+    const cPrimary = "#00f2fe";
+    const cSecondary = "#ff007f";
+    const cArmor = "#1e293b";
+    const cDetails = "#ffffff";
+
+    // Mochila/Energía (Atrás)
+    ctx.fillStyle = cSecondary;
+    ctx.fillRect(-w/2 - 2, -h/2 + 8, 5, 20);
+    ctx.fillStyle = cPrimary;
+    ctx.fillRect(-w/2 - 2, -h/2 + 10 + (gameTick%20>10?2:0), 3, 10); // Efecto pulso
+
+    // Cuerpo/Armadura Base
+    ctx.fillStyle = cArmor;
+    ctx.fillRect(-w/2, -h/2 + 6, w, h-6);
+
+    // Casco
+    ctx.fillStyle = cDetails;
+    ctx.fillRect(-w/4, -h/2 - 2, w/2, 10);
+    // Visor brillante
+    ctx.fillStyle = cPrimary;
+    ctx.shadowBlur = 5; ctx.shadowColor = cPrimary;
+    ctx.fillRect(facing === 1 ? 0 : -w/4, -h/2, w/4, 4);
+    ctx.shadowBlur = 0;
+
+    // Detalles Armadura (Pecho)
+    ctx.fillStyle = cDetails;
+    ctx.fillRect(-w/2 + 4, -h/2 + 12, w-8, 12);
+    ctx.fillStyle = cArmor;
+    ctx.fillRect(-w/2 + 6, -h/2 + 14, w-12, 8); // Hueco armadura
+
+    // Piernas animadas
+    ctx.fillStyle = cArmor;
+    const legW = 6;
+    const legH = 12;
+    let legY = h/2 - legH;
+    let offsetX = 0;
+
+    if (!grounded) {
+      // Pose de salto
+      ctx.fillRect(-w/2 + 2, legY - 4, legW, legH);
+      ctx.fillRect(w/2 - legW - 2, legY - 2, legW, legH);
+    } else if (vx !== 0) {
+      // Animación de correr
+      const off = Math.sin(frame * 0.5) * 4;
+      ctx.fillRect(-w/2 + 2 + off, legY, legW, legH);
+      ctx.fillRect(w/2 - legW - 2 - off, legY, legW, legH);
+    } else {
+      // Pose parado
+      ctx.fillRect(-w/2 + 3, legY, legW, legH);
+      ctx.fillRect(w/2 - legW - 3, legY, legW, legH);
+    }
+
+    // Brazos y Espada de Energía
+    if (attacking) {
+      // Brazo atacando
+      ctx.fillStyle = cDetails;
+      ctx.fillRect(w/2 - 4, -h/2 + 10, 10, 6);
+      // Espada
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowBlur = 15; ctx.shadowColor = cPrimary;
+      ctx.fillRect(w/2 + 4, -h/2 + 8, 30, 10); // Hoja espada
+      ctx.fillStyle = cPrimary;
+      ctx.fillRect(w/2 + 6, -h/2 + 10, 26, 6); // Núcleo espada
+      ctx.shadowBlur = 0;
+    } else {
+      // Brazo en reposo (animado)
+      ctx.fillStyle = cDetails;
+      const armOff = (vx !== 0 && grounded) ? Math.cos(frame * 0.5) * 2 : 0;
+      ctx.fillRect(w/2 - 6 + armOff, -h/2 + 12, 6, 14);
+    }
+
+    ctx.restore();
+  },
+
+  // Dibuja Enemigo Drone volador
+  drawEnemy(ctx, x, y, w, h) {
+    ctx.save();
+    const cBase = "#ff007f";
+    const cCore = "#ffffff";
+
+    ctx.shadowBlur = 10; ctx.shadowColor = cBase;
+    // Cuerpo circular
+    ctx.fillStyle = "#1e293b";
+    ctx.beginPath(); ctx.arc(x + w/2, y + h/2, w/2, 0, Math.PI*2); ctx.fill();
+    // Detalles metálicos
+    ctx.strokeStyle = cBase; ctx.lineWidth = 2; ctx.stroke();
+    // Núcleo brillante (pulsa)
+    ctx.fillStyle = (gameTick%10<5) ? cCore : cBase;
+    ctx.beginPath(); ctx.arc(x + w/2, y + h/2, w/4, 0, Math.PI*2); ctx.fill();
+
+    // Aspas/Propulsores
+    ctx.fillStyle = cBase;
+    const angle = (gameTick * 0.2) % (Math.PI*2);
+    ctx.translate(x + w/2, y + h/2);
+    ctx.rotate(angle);
+    ctx.fillRect(-w/2 - 4, -2, 4, 4);
+    ctx.fillRect(w/2, -2, 4, 4);
+    ctx.restore();
+  },
+
+  // Dibuja Jefe Cibernético
+  drawBoss(ctx, x, y, w, h, hp, maxHp) {
+    ctx.save();
+    const cBase = "#a855f7";
+    const cDetails = "#ffffff";
+
+    ctx.shadowBlur = 15; ctx.shadowColor = cBase;
+    // Cuerpo masivo
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(x, y + h/4, w, h*0.75);
+    ctx.strokeStyle = cBase; ctx.lineWidth = 3; ctx.strokeRect(x, y + h/4, w, h*0.75);
+
+    // Cabeza/Sensor
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(x + w/4, y, w/2, h/4);
+    // Ojo brillante
+    ctx.fillStyle = (gameTick%20<10) ? cDetails : cBase;
+    ctx.fillRect(x + w/2 - w/8, y + 6, w/4, 6);
+
+    // Detalles armadura Pecho
+    ctx.fillStyle = cBase;
+    ctx.fillRect(x + 10, y + h/2, w - 20, h/4);
+    ctx.fillStyle = cDetails;
+    ctx.fillRect(x + 20, y + h/2 + 5, w - 40, 5);
+
+    // Cañones laterales
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(x - 15, y + h/3, 15, h/3);
+    ctx.fillRect(x + w, y + h/3, 15, h/3);
+    ctx.fillStyle = cBase;
+    if (gameTick%40<5) { ctx.fillStyle = cDetails; ctx.shadowBlur = 20; }
+    ctx.fillRect(x - 10, y + h/3 + 5, 5, h/3 - 10);
+    ctx.fillRect(x + w + 5, y + h/3 + 5, 5, h/3 - 10);
+
+    ctx.shadowBlur = 0;
+
+    // Barra de Vida
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(canvas.width/2 - 200, 20, 400, 15);
+    ctx.fillStyle = cBase;
+    ctx.fillRect(canvas.width/2 - 200, 20, (hp / maxHp) * 400, 15);
+    ctx.restore();
+  }
+};
+
+// --- LÓGICA DEL JUEGO (FÍSICAS, NIVELES, ETC.) ---
+
 // Jugador
 const player = {
   x: 50, y: 300, w: 32, h: 48,
   vx: 0, vy: 0,
-  speed: 4, jumpPower: -10,
-  grounded: false,
-  health: 100,
-  facing: 1,
-  attacking: false,
-  attackTimer: 0,
-  animFrame: 0,
-  animTimer: 0,
+  speed: 4, jumpPower: -11,
+  grounded: false, health: 100,
+  facing: 1, attacking: false, attackTimer: 0,
   hasKey: false
 };
 
@@ -183,9 +294,7 @@ let boss = null;
 
 function loadLevel(lvl) {
   currentLevel = lvl;
-  player.x = 50; player.y = 300;
-  player.vx = 0; player.vy = 0;
-  player.hasKey = false;
+  player.x = 50; player.y = 300; player.vx = 0; player.vy = 0; player.hasKey = false;
   enemies = []; boss = null;
 
   if (lvl === 1) {
@@ -195,9 +304,9 @@ function loadLevel(lvl) {
       { x: 340, y: 250, w: 120, h: 15 },
       { x: 530, y: 180, w: 120, h: 15 }
     ];
-    keyItem = { x: 580, y: 140, w: 18, h: 18, collected: false };
+    keyItem = { x: 580, y: 140, w: 20, h: 20, collected: false };
     door = { x: 730, y: 330, w: 40, h: 80 };
-    enemies.push({ x: 380, y: 220, w: 28, h: 28, dir: 1, range: [340, 440], speed: 1.5, hp: 30 });
+    enemies.push({ x: 380, y: 210, w: 30, h: 30, dir: 1, range: [340, 440], speed: 1.5, hp: 30 });
   } else if (lvl === 2) {
     platforms = [
       { x: 0, y: 410, w: 800, h: 40 },
@@ -206,20 +315,19 @@ function loadLevel(lvl) {
       { x: 420, y: 210, w: 100, h: 15 },
       { x: 580, y: 150, w: 100, h: 15 }
     ];
-    keyItem = { x: 620, y: 110, w: 18, h: 18, collected: false };
+    keyItem = { x: 620, y: 110, w: 20, h: 20, collected: false };
     door = { x: 730, y: 330, w: 40, h: 80 };
-    enemies.push({ x: 280, y: 240, w: 28, h: 28, dir: 1, range: [260, 340], speed: 2, hp: 40 });
-    enemies.push({ x: 440, y: 180, w: 28, h: 28, dir: -1, range: [420, 500], speed: 2, hp: 40 });
+    enemies.push({ x: 280, y: 230, w: 30, h: 30, dir: 1, range: [260, 340], speed: 2, hp: 40 });
+    enemies.push({ x: 440, y: 170, w: 30, h: 30, dir: -1, range: [420, 500], speed: 2, hp: 40 });
   } else if (lvl === 3) {
     platforms = [
       { x: 0, y: 410, w: 800, h: 40 },
       { x: 100, y: 280, w: 120, h: 15 },
       { x: 580, y: 280, w: 120, h: 15 }
     ];
-    keyItem = null;
-    player.hasKey = true;
+    keyItem = null; player.hasKey = true;
     door = { x: 740, y: 330, w: 40, h: 80 };
-    boss = { x: 550, y: 270, w: 80, h: 100, hp: 150, maxHp: 150, dir: -1 };
+    boss = { x: 550, y: 260, w: 100, h: 130, hp: 180, maxHp: 180 };
   }
 }
 
@@ -236,57 +344,49 @@ function restartGame() { startGame(); }
 
 function update() {
   if (gameState !== "PLAYING") return;
+  gameTick++;
 
-  if (keys["KeyA"] || keys["ArrowLeft"]) {
-    player.vx = -player.speed;
-    player.facing = -1;
-  } else if (keys["KeyD"] || keys["ArrowRight"]) {
-    player.vx = player.speed;
-    player.facing = 1;
-  } else {
-    player.vx = 0;
-  }
+  // Movimiento Jugador
+  if (keys["KeyA"] || keys["ArrowLeft"]) { player.vx = -player.speed; player.facing = -1; }
+  else if (keys["KeyD"] || keys["ArrowRight"]) { player.vx = player.speed; player.facing = 1; }
+  else { player.vx = 0; }
 
   if ((keys["KeyW"] || keys["Space"] || keys["ArrowUp"]) && player.grounded) {
     player.vy = player.jumpPower;
     player.grounded = false;
   }
 
+  // Ataque
   if (keys["KeyJ"] && player.attackTimer <= 0) {
     player.attacking = true;
-    player.attackTimer = 15;
+    player.attackTimer = 20;
   }
   if (player.attackTimer > 0) {
     player.attackTimer--;
     if (player.attackTimer === 0) player.attacking = false;
   }
 
-  player.vy += 0.5;
+  // Físicas básicas
+  player.vy += 0.6; // Gravedad
   player.x += player.vx;
   player.y += player.vy;
 
+  // Límites pantalla
   if (player.x < 0) player.x = 0;
   if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
 
-  if (Math.abs(player.vx) > 0) {
-    player.animTimer++;
-    if (player.animTimer % 8 === 0) {
-      player.animFrame = (player.animFrame + 1) % 6;
-    }
-  } else {
-    player.animFrame = 0;
-  }
-
+  // Colisiones Plataformas
   player.grounded = false;
   platforms.forEach(p => {
     if (player.x < p.x + p.w && player.x + player.w > p.x &&
-        player.y + player.h >= p.y && player.y + player.h <= p.y + 15 && player.vy >= 0) {
+        player.y + player.h >= p.y && player.y + player.h <= p.y + 20 && player.vy >= 0) {
       player.y = p.y - player.h;
       player.vy = 0;
       player.grounded = true;
     }
   });
 
+  // Recoger Llave
   if (keyItem && !keyItem.collected) {
     if (player.x < keyItem.x + keyItem.w && player.x + player.w > keyItem.x &&
         player.y < keyItem.y + keyItem.h && player.y + player.h > keyItem.y) {
@@ -295,146 +395,89 @@ function update() {
     }
   }
 
-  if (player.hasKey && player.x < door.x + door.w && player.x + player.w > door.x &&
+  // Puerta Salida
+  if (player.hasKey && door && player.x < door.x + door.w && player.x + player.w > door.x &&
       player.y < door.y + door.h && player.y + player.h > door.y) {
-    if (currentLevel < 3) {
-      loadLevel(currentLevel + 1);
-    } else if (currentLevel === 3 && (!boss || boss.hp <= 0)) {
-      endGame(true);
-      return;
-    }
+    if (currentLevel < 3) loadLevel(currentLevel + 1);
+    else if (currentLevel === 3 && (!boss || boss.hp <= 0)) endGame(true);
   }
 
+  // Enemigos Drones
   enemies.forEach(e => {
     e.x += e.speed * e.dir;
     if (e.x < e.range[0] || e.x + e.w > e.range[1]) e.dir *= -1;
-
-    if (player.attacking && Math.abs((player.x + player.w/2) - (e.x + e.w/2)) < 50 &&
-        Math.abs(player.y - e.y) < 40) {
-      e.hp -= 5;
+    // Daño al enemigo
+    if (player.attacking && Math.abs((player.x + player.w/2) - (e.x + e.w/2)) < 60 && Math.abs(player.y - e.y) < 40) {
+      e.hp -= 2;
     }
-    if (player.x < e.x + e.w && player.x + player.w > e.x &&
-        player.y < e.y + e.h && player.y + player.h > e.y) {
-      player.health -= 0.5;
+    // Daño al jugador
+    if (player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+      player.health -= 0.4;
     }
   });
   enemies = enemies.filter(e => e.hp > 0);
 
+  // Jefe Final
   if (boss && boss.hp > 0) {
-    if (player.attacking && Math.abs((player.x + player.w/2) - (boss.x + boss.w/2)) < 70 &&
-        Math.abs(player.y - boss.y) < 60) {
-      boss.hp -= 1.5;
+    // Daño al jefe
+    if (player.attacking && Math.abs((player.x + player.w/2) - (boss.x + boss.w/2)) < 90 && Math.abs(player.y - boss.y) < 70) {
+      boss.hp -= 1;
     }
-    if (player.x < boss.x + boss.w && player.x + player.w > boss.x &&
-        player.y < boss.y + boss.h && player.y + player.h > boss.y) {
-      player.health -= 1;
+    // Daño al jugador (contacto)
+    if (player.x < boss.x + boss.w && player.x + player.w > boss.x && player.y < boss.y + boss.h && player.y + player.h > boss.y) {
+      player.health -= 0.8;
     }
   }
 
-  if (player.health <= 0) {
-    endGame(false);
-    return;
-  }
+  // Muerte
+  if (player.health <= 0) endGame(false);
 
   draw();
   requestAnimationFrame(update);
 }
 
-function drawPlayer() {
-  ctx.save();
-  ctx.translate(player.x + player.w / 2, player.y + player.h / 2);
-  if (player.facing === -1) ctx.scale(-1, 1);
-
-  if (playerSprite) {
-    const frameW = playerSprite.width / 6;
-    const frameH = playerSprite.height / 4;
-    const row = player.attacking ? 2 : (player.grounded ? 0 : 1);
-    const col = player.attacking ? (player.attackTimer % 4) : player.animFrame;
-
-    ctx.drawImage(
-      playerSprite,
-      col * frameW, row * frameH, frameW, frameH,
-      -player.w / 2, -player.h / 2, player.w, player.h
-    );
-  } else {
-    ctx.fillStyle = "#00f2fe";
-    ctx.shadowBlur = 10; ctx.shadowColor = "#00f2fe";
-    ctx.fillRect(-player.w / 2, -player.h / 2, player.w, player.h);
-  }
-
-  if (player.attacking) {
-    ctx.fillStyle = "#ffffff";
-    ctx.shadowBlur = 15; ctx.shadowColor = "#00f2fe";
-    ctx.fillRect(player.w / 2, -5, 25, 10);
-  }
-
-  ctx.restore();
-}
-
-function drawBoss() {
-  if (!boss || boss.hp <= 0) return;
-
-  if (bossSprite) {
-    const frameW = bossSprite.width / 4;
-    const frameH = bossSprite.height / 4;
-    ctx.drawImage(
-      bossSprite,
-      0, 0, frameW, frameH,
-      boss.x, boss.y, boss.w, boss.h
-    );
-  } else {
-    ctx.fillStyle = "#a855f7";
-    ctx.shadowBlur = 15; ctx.shadowColor = "#a855f7";
-    ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
-    ctx.shadowBlur = 0;
-  }
-
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(200, 20, 400, 15);
-  ctx.fillStyle = "#a855f7";
-  ctx.fillRect(200, 20, (boss.hp / boss.maxHp) * 400, 15);
-}
-
 function draw() {
+  // Fondo
   if (bgLevel.complete && bgLevel.naturalWidth !== 0) {
     ctx.drawImage(bgLevel, 0, 0, canvas.width, canvas.height);
   } else {
-    ctx.fillStyle = "#0b0f19";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Fondo generado (Grid futurista)
+    ctx.fillStyle = "#0b0f19"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "rgba(0, 242, 254, 0.1)"; ctx.lineWidth = 1;
+    for(let i=0; i<canvas.width; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i, canvas.height); ctx.stroke(); }
+    for(let i=0; i<canvas.height; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(canvas.width, i); ctx.stroke(); }
   }
 
-  ctx.fillStyle = "rgba(30, 41, 59, 0.85)";
-  ctx.strokeStyle = "#00f2fe";
-  platforms.forEach(p => {
-    ctx.fillRect(p.x, p.y, p.w, p.h);
-    ctx.strokeRect(p.x, p.y, p.w, p.h);
-  });
+  // Plataformas
+  ctx.fillStyle = "rgba(30, 41, 59, 0.9)"; ctx.strokeStyle = "#00f2fe"; ctx.lineWidth = 2;
+  platforms.forEach(p => { ctx.fillRect(p.x, p.y, p.w, p.h); ctx.strokeRect(p.x, p.y, p.w, p.h); });
 
+  // Llave/Tarjeta
   if (keyItem && !keyItem.collected) {
-    ctx.fillStyle = "#ff007f";
-    ctx.shadowBlur = 10; ctx.shadowColor = "#ff007f";
-    ctx.fillRect(keyItem.x, keyItem.y, keyItem.w, keyItem.h);
-    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ff007f"; ctx.shadowBlur = 15; ctx.shadowColor = "#ff007f";
+    ctx.fillRect(keyItem.x, keyItem.y, keyItem.w, keyItem.h); ctx.shadowBlur = 0;
   }
 
-  ctx.fillStyle = player.hasKey ? "#38ef7d" : "#ef4444";
-  ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
-  ctx.fillRect(door.x, door.y, door.w, door.h);
-  ctx.shadowBlur = 0;
+  // Puerta
+  if (door) {
+    ctx.fillStyle = player.hasKey ? "#38ef7d" : "#ef4444"; ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
+    ctx.fillRect(door.x, door.y, door.w, door.h); ctx.shadowBlur = 0;
+  }
 
-  enemies.forEach(e => {
-    ctx.fillStyle = "#ff007f";
-    ctx.fillRect(e.x, e.y, e.w, e.h);
-  });
+  // Dibujar Enemigos y Jefe usando Motor de Sprites
+  enemies.forEach(e => SpritePainter.drawEnemy(ctx, e.x, e.y, e.w, e.h));
+  if (boss) SpritePainter.drawBoss(ctx, boss.x, boss.y, boss.w, boss.h, boss.hp, boss.maxHp);
 
-  drawBoss();
-  drawPlayer();
+  // Dibujar Jugador usando Motor de Sprites
+  SpritePainter.drawPlayer(ctx, player.x, player.y, player.w, player.h, player.vx, player.vy, player.grounded, player.attacking, player.attackTimer, player.facing, gameTick);
 
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 14px 'Segoe UI'";
+  // HUD
+  ctx.fillStyle = "#ffffff"; ctx.font = "bold 16px 'Segoe UI'";
   ctx.fillText(`NIVEL: ${currentLevel}`, 20, 30);
-  ctx.fillText(`SALUD: ${Math.max(0, Math.ceil(player.health))}%`, 100, 30);
-  ctx.fillText(`TARJETA: ${player.hasKey ? "CONSEGUIDA" : "BUSCAR"}`, 220, 30);
+  ctx.fillStyle = player.health > 30 ? "#38ef7d" : "#ef4444";
+  ctx.fillText(`SALUD: ${Math.max(0, Math.ceil(player.health))}%`, 120, 30);
+  ctx.fillStyle = player.hasKey ? "#38ef7d" : "#ff007f";
+  ctx.fillText(`TARJETA: ${player.hasKey ? "OK" : "BUSCAR"}`, 240, 30);
 }
 
 function endGame(won) {
@@ -442,16 +485,8 @@ function endGame(won) {
   const screen = document.getElementById("end-screen");
   const title = document.getElementById("end-title");
   const desc = document.getElementById("end-desc");
-
-  if (won) {
-    title.innerText = "¡MISIÓN COMPLETADA!";
-    title.style.color = "#38ef7d";
-    desc.innerText = "Has derrotado a N.E.X.U.S. y escapado de las profundidades de Atheria.";
-  } else {
-    title.innerText = "MISIÓN FALLIDA";
-    title.style.color = "#ef4444";
-    desc.innerText = "Tu traje espacial colapsó. Las instalaciones te han engullido.";
-  }
+  if (won) { title.innerText = "¡MISIÓN COMPLETADA!"; title.style.color = "#38ef7d"; desc.innerText = "Has derrotado a N.E.X.U.S. y escapado de Atheria."; }
+  else { title.innerText = "MISIÓN FALLIDA"; title.style.color = "#ef4444"; desc.innerText = "El núcleo te ha consumido. Inténtalo de nuevo."; }
   screen.style.display = "flex";
 }
 </script>
