@@ -32,8 +32,11 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: rgba(5, 8, 17, 0.85);
+      background: rgba(5, 8, 17, 0.75);
       backdrop-filter: blur(4px);
+    }
+    #start-screen {
+      background: linear-gradient(rgba(5, 8, 17, 0.6), rgba(5, 8, 17, 0.8)), url('start_bg.jpg') center/cover no-repeat;
     }
     h1 {
       font-size: 38px;
@@ -44,11 +47,12 @@
     }
     p {
       font-size: 16px;
-      color: #94a3b8;
+      color: #e2e8f0;
       max-width: 500px;
       text-align: center;
       margin-bottom: 25px;
       line-height: 1.5;
+      text-shadow: 0 0 5px #000;
     }
     button {
       padding: 12px 30px;
@@ -71,9 +75,10 @@
       margin-top: 20px;
       font-size: 14px;
       color: #38ef7d;
-      background: rgba(0,0,0,0.5);
+      background: rgba(0, 0, 0, 0.8);
       padding: 10px 20px;
       border-radius: 5px;
+      border: 1px solid #38ef7d;
     }
   </style>
 </head>
@@ -90,7 +95,7 @@
     <div class="controls">Controles: [A / D] Moverse | [W / Espacio] Saltar | [J] Atacar</div>
   </div>
 
-  <!-- Pantalla de Fin/Victoria -->
+  <!-- Pantalla de Fin / Victoria -->
   <div id="end-screen" class="ui-layer" style="display: none;">
     <h1 id="end-title">MISIÓN COMPLETADA</h1>
     <p id="end-desc">Has destruido a N.E.X.U.S. y escapado con vida de Atheria.</p>
@@ -102,15 +107,17 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-let gameState = "MENU"; // MENU, PLAYING, WIN, GAMEOVER
+// Carga de Imagen de Fondo (directo desde la raíz de GitHub)
+const bgLevel = new Image();
+bgLevel.src = 'level_bg.jpg';
+
+let gameState = "MENU";
 let currentLevel = 1;
 
-// Teclas
 const keys = {};
 window.addEventListener("keydown", e => keys[e.code] = true);
 window.addEventListener("keyup", e => keys[e.code] = false);
 
-// Jugador
 const player = {
   x: 50, y: 300, w: 24, h: 36,
   vx: 0, vy: 0,
@@ -122,7 +129,6 @@ const player = {
   hasKey: false
 };
 
-// Configuración de Niveles
 let platforms = [];
 let enemies = [];
 let keyItem = null;
@@ -131,16 +137,12 @@ let boss = null;
 
 function loadLevel(lvl) {
   currentLevel = lvl;
-  player.x = 50;
-  player.y = 300;
-  player.vx = 0;
-  player.vy = 0;
+  player.x = 50; player.y = 300;
+  player.vx = 0; player.vy = 0;
   player.hasKey = false;
-  enemies = [];
-  boss = null;
+  enemies = []; boss = null;
 
   if (lvl === 1) {
-    // Nivel 1: Laboratorio de Escape
     platforms = [
       { x: 0, y: 410, w: 800, h: 40 },
       { x: 150, y: 320, w: 120, h: 15 },
@@ -151,7 +153,6 @@ function loadLevel(lvl) {
     door = { x: 730, y: 330, w: 40, h: 80 };
     enemies.push({ x: 380, y: 220, w: 24, h: 24, dir: 1, range: [340, 440], speed: 1.5, hp: 30 });
   } else if (lvl === 2) {
-    // Nivel 2: El Reactor
     platforms = [
       { x: 0, y: 410, w: 800, h: 40 },
       { x: 100, y: 330, w: 100, h: 15 },
@@ -164,7 +165,6 @@ function loadLevel(lvl) {
     enemies.push({ x: 280, y: 240, w: 24, h: 24, dir: 1, range: [260, 340], speed: 2, hp: 40 });
     enemies.push({ x: 440, y: 180, w: 24, h: 24, dir: -1, range: [420, 500], speed: 2, hp: 40 });
   } else if (lvl === 3) {
-    // Nivel 3: Sala del Jefe
     platforms = [
       { x: 0, y: 410, w: 800, h: 40 },
       { x: 100, y: 280, w: 120, h: 15 },
@@ -173,7 +173,7 @@ function loadLevel(lvl) {
     keyItem = null;
     player.hasKey = true;
     door = { x: 740, y: 330, w: 40, h: 80 };
-    boss = { x: 550, y: 290, w: 60, h: 80, hp: 150, maxHp: 150, dir: -1, attackCooldown: 0 };
+    boss = { x: 550, y: 290, w: 60, h: 80, hp: 150, maxHp: 150, dir: -1 };
   }
 }
 
@@ -186,14 +186,12 @@ function startGame() {
   requestAnimationFrame(update);
 }
 
-function restartGame() {
-  startGame();
-}
+function restartGame() { startGame(); }
 
 function update() {
   if (gameState !== "PLAYING") return;
 
-  // --- Movimiento del Jugador ---
+  // Movimiento
   if (keys["KeyA"] || keys["ArrowLeft"]) player.vx = -player.speed;
   else if (keys["KeyD"] || keys["ArrowRight"]) player.vx = player.speed;
   else player.vx = 0;
@@ -213,18 +211,14 @@ function update() {
     if (player.attackTimer === 0) player.attacking = false;
   }
 
-  // Gravedad
   player.vy += 0.5;
-
-  // Posición
   player.x += player.vx;
   player.y += player.vy;
 
-  // Limites
   if (player.x < 0) player.x = 0;
   if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
 
-  // Colisión con Plataformas
+  // Plataformas
   player.grounded = false;
   platforms.forEach(p => {
     if (player.x < p.x + p.w && player.x + player.w > p.x &&
@@ -235,7 +229,7 @@ function update() {
     }
   });
 
-  // --- Recoger Llave ---
+  // Llave
   if (keyItem && !keyItem.collected) {
     if (player.x < keyItem.x + keyItem.w && player.x + player.w > keyItem.x &&
         player.y < keyItem.y + keyItem.h && player.y + player.h > keyItem.y) {
@@ -244,7 +238,7 @@ function update() {
     }
   }
 
-  // --- Entrar por la Puerta ---
+  // Puerta de Salida
   if (player.hasKey && player.x < door.x + door.w && player.x + player.w > door.x &&
       player.y < door.y + door.h && player.y + player.h > door.y) {
     if (currentLevel < 3) {
@@ -255,18 +249,15 @@ function update() {
     }
   }
 
-  // --- Enemigos Estándar ---
+  // Enemigos
   enemies.forEach(e => {
     e.x += e.speed * e.dir;
     if (e.x < e.range[0] || e.x + e.w > e.range[1]) e.dir *= -1;
 
-    // Recibir ataque
     if (player.attacking && Math.abs((player.x + player.w/2) - (e.x + e.w/2)) < 40 &&
         Math.abs(player.y - e.y) < 30) {
       e.hp -= 5;
     }
-
-    // Dañar al jugador
     if (player.x < e.x + e.w && player.x + player.w > e.x &&
         player.y < e.y + e.h && player.y + player.h > e.y) {
       player.health -= 0.5;
@@ -274,20 +265,18 @@ function update() {
   });
   enemies = enemies.filter(e => e.hp > 0);
 
-  // --- Lógica del Jefe ---
+  // Jefe Final
   if (boss && boss.hp > 0) {
     if (player.attacking && Math.abs((player.x + player.w/2) - (boss.x + boss.w/2)) < 60 &&
         Math.abs(player.y - boss.y) < 50) {
       boss.hp -= 1.5;
     }
-
     if (player.x < boss.x + boss.w && player.x + player.w > boss.x &&
         player.y < boss.y + boss.h && player.y + player.h > boss.y) {
       player.health -= 1;
     }
   }
 
-  // Muerte del Jugador
   if (player.health <= 0) {
     endGame(false);
     return;
@@ -298,25 +287,23 @@ function update() {
 }
 
 function draw() {
-  // Limpiar Pantalla
-  ctx.fillStyle = "#0b0f19";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Dibujar Fondo (Líneas futuristas)
-  ctx.strokeStyle = "rgba(0, 242, 254, 0.05)";
-  for(let i=0; i<canvas.width; i+=40) {
-    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i, canvas.height); ctx.stroke();
+  // Fondo
+  if (bgLevel.complete && bgLevel.naturalWidth !== 0) {
+    ctx.drawImage(bgLevel, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "#0b0f19";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   // Plataformas
-  ctx.fillStyle = "#1e293b";
+  ctx.fillStyle = "rgba(30, 41, 59, 0.85)";
   ctx.strokeStyle = "#00f2fe";
   platforms.forEach(p => {
     ctx.fillRect(p.x, p.y, p.w, p.h);
     ctx.strokeRect(p.x, p.y, p.w, p.h);
   });
 
-  // Llave / Tarjeta de acceso
+  // Llave
   if (keyItem && !keyItem.collected) {
     ctx.fillStyle = "#ff007f";
     ctx.shadowBlur = 10; ctx.shadowColor = "#ff007f";
@@ -324,7 +311,7 @@ function draw() {
     ctx.shadowBlur = 0;
   }
 
-  // Puerta de Salida
+  // Puerta
   ctx.fillStyle = player.hasKey ? "#38ef7d" : "#ef4444";
   ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
   ctx.fillRect(door.x, door.y, door.w, door.h);
@@ -336,14 +323,14 @@ function draw() {
     ctx.fillRect(e.x, e.y, e.w, e.h);
   });
 
-  // Jefe Final
+  // Jefe
   if (boss && boss.hp > 0) {
     ctx.fillStyle = "#a855f7";
     ctx.shadowBlur = 15; ctx.shadowColor = "#a855f7";
     ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
     ctx.shadowBlur = 0;
 
-    // Barra Vida Jefe
+    // Barra de Vida del Jefe
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(200, 20, 400, 15);
     ctx.fillStyle = "#a855f7";
@@ -362,9 +349,9 @@ function draw() {
     ctx.fillRect(player.x + player.w, player.y + 10, 20, 10);
   }
 
-  // Interfaz (HUD)
+  // HUD / Interfaz
   ctx.fillStyle = "#ffffff";
-  ctx.font = "14px 'Segoe UI'";
+  ctx.font = "bold 14px 'Segoe UI'";
   ctx.fillText(`NIVEL: ${currentLevel}`, 20, 30);
   ctx.fillText(`SALUD: ${Math.max(0, Math.ceil(player.health))}%`, 100, 30);
   ctx.fillText(`TARJETA: ${player.hasKey ? "CONSEGUIDA" : "BUSCAR"}`, 220, 30);
