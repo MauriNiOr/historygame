@@ -107,17 +107,51 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// Carga de imágenes directas de la raíz del repositorio
+// Carga de imágenes
 const bgLevel = new Image();
 bgLevel.src = 'level_bg.jpg';
 
-const imgPlayer = new Image();
-imgPlayer.src = 'player.jpg';
-imgPlayer.onerror = () => { imgPlayer.src = 'player_sprites.jpg'; };
+// Función para remover el fondo blanco de una imagen JPG
+function removeWhiteBackground(imageSrc, callback) {
+  const rawImg = new Image();
+  rawImg.crossOrigin = "Anonymous";
+  rawImg.src = imageSrc;
+  rawImg.onload = () => {
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = rawImg.width;
+    tempCanvas.height = rawImg.height;
+    const tempCtx = tempCanvas.getContext("2d");
+    tempCtx.drawImage(rawImg, 0, 0);
 
-const imgBoss = new Image();
-imgBoss.src = 'boss.jpg';
-imgBoss.onerror = () => { imgBoss.src = 'boss_sprites.jpg'; };
+    const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    const data = imgData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // Si el píxel es blanco o casi blanco, lo volvemos 100% transparente
+      if (r > 220 && g > 220 && b > 220) {
+        data[i + 3] = 0;
+      }
+    }
+    tempCtx.putImageData(imgData, 0, 0);
+
+    const cleanImg = new Image();
+    cleanImg.src = tempCanvas.toDataURL();
+    cleanImg.onload = () => callback(cleanImg);
+  };
+  rawImg.onerror = () => {
+    console.warn("No se pudo cargar la imagen:", imageSrc);
+  };
+}
+
+let playerSprite = null;
+let bossSprite = null;
+
+// Procesamos las imágenes para quitarles el fondo blanco al iniciar
+removeWhiteBackground('player.jpg', img => playerSprite = img);
+removeWhiteBackground('boss.jpg', img => bossSprite = img);
 
 let gameState = "MENU";
 let currentLevel = 1;
@@ -133,7 +167,7 @@ const player = {
   speed: 4, jumpPower: -10,
   grounded: false,
   health: 100,
-  facing: 1, // 1 = Derecha, -1 = Izquierda
+  facing: 1,
   attacking: false,
   attackTimer: 0,
   animFrame: 0,
@@ -203,7 +237,6 @@ function restartGame() { startGame(); }
 function update() {
   if (gameState !== "PLAYING") return;
 
-  // Movimiento
   if (keys["KeyA"] || keys["ArrowLeft"]) {
     player.vx = -player.speed;
     player.facing = -1;
@@ -219,7 +252,6 @@ function update() {
     player.grounded = false;
   }
 
-  // Ataque
   if (keys["KeyJ"] && player.attackTimer <= 0) {
     player.attacking = true;
     player.attackTimer = 15;
@@ -236,7 +268,6 @@ function update() {
   if (player.x < 0) player.x = 0;
   if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
 
-  // Animación del personaje
   if (Math.abs(player.vx) > 0) {
     player.animTimer++;
     if (player.animTimer % 8 === 0) {
@@ -246,7 +277,6 @@ function update() {
     player.animFrame = 0;
   }
 
-  // Colisiones con plataformas
   player.grounded = false;
   platforms.forEach(p => {
     if (player.x < p.x + p.w && player.x + player.w > p.x &&
@@ -257,7 +287,6 @@ function update() {
     }
   });
 
-  // Llave
   if (keyItem && !keyItem.collected) {
     if (player.x < keyItem.x + keyItem.w && player.x + player.w > keyItem.x &&
         player.y < keyItem.y + keyItem.h && player.y + player.h > keyItem.y) {
@@ -266,7 +295,6 @@ function update() {
     }
   }
 
-  // Puerta de Salida
   if (player.hasKey && player.x < door.x + door.w && player.x + player.w > door.x &&
       player.y < door.y + door.h && player.y + player.h > door.y) {
     if (currentLevel < 3) {
@@ -277,7 +305,6 @@ function update() {
     }
   }
 
-  // Enemigos
   enemies.forEach(e => {
     e.x += e.speed * e.dir;
     if (e.x < e.range[0] || e.x + e.w > e.range[1]) e.dir *= -1;
@@ -293,7 +320,6 @@ function update() {
   });
   enemies = enemies.filter(e => e.hp > 0);
 
-  // Jefe Final
   if (boss && boss.hp > 0) {
     if (player.attacking && Math.abs((player.x + player.w/2) - (boss.x + boss.w/2)) < 70 &&
         Math.abs(player.y - boss.y) < 60) {
@@ -319,20 +345,18 @@ function drawPlayer() {
   ctx.translate(player.x + player.w / 2, player.y + player.h / 2);
   if (player.facing === -1) ctx.scale(-1, 1);
 
-  if (imgPlayer.complete && imgPlayer.naturalWidth > 0) {
-    // Si la imagen es una hoja de sprites, recortamos el marco
-    const frameW = imgPlayer.naturalWidth / 6;
-    const frameH = imgPlayer.naturalHeight / 4;
-    const row = player.attacking ? 2 : (player.grounded ? (player.vx !== 0 ? 0 : 0) : 1);
+  if (playerSprite) {
+    const frameW = playerSprite.width / 6;
+    const frameH = playerSprite.height / 4;
+    const row = player.attacking ? 2 : (player.grounded ? 0 : 1);
     const col = player.attacking ? (player.attackTimer % 4) : player.animFrame;
 
     ctx.drawImage(
-      imgPlayer,
+      playerSprite,
       col * frameW, row * frameH, frameW, frameH,
       -player.w / 2, -player.h / 2, player.w, player.h
     );
   } else {
-    // Renderizado de respaldo si aún no carga la imagen
     ctx.fillStyle = "#00f2fe";
     ctx.shadowBlur = 10; ctx.shadowColor = "#00f2fe";
     ctx.fillRect(-player.w / 2, -player.h / 2, player.w, player.h);
@@ -350,11 +374,11 @@ function drawPlayer() {
 function drawBoss() {
   if (!boss || boss.hp <= 0) return;
 
-  if (imgBoss.complete && imgBoss.naturalWidth > 0) {
-    const frameW = imgBoss.naturalWidth / 4;
-    const frameH = imgBoss.naturalHeight / 4;
+  if (bossSprite) {
+    const frameW = bossSprite.width / 4;
+    const frameH = bossSprite.height / 4;
     ctx.drawImage(
-      imgBoss,
+      bossSprite,
       0, 0, frameW, frameH,
       boss.x, boss.y, boss.w, boss.h
     );
@@ -365,7 +389,6 @@ function drawBoss() {
     ctx.shadowBlur = 0;
   }
 
-  // Barra de Vida del Jefe
   ctx.fillStyle = "rgba(0,0,0,0.5)";
   ctx.fillRect(200, 20, 400, 15);
   ctx.fillStyle = "#a855f7";
@@ -373,7 +396,6 @@ function drawBoss() {
 }
 
 function draw() {
-  // Fondo
   if (bgLevel.complete && bgLevel.naturalWidth !== 0) {
     ctx.drawImage(bgLevel, 0, 0, canvas.width, canvas.height);
   } else {
@@ -381,7 +403,6 @@ function draw() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
-  // Plataformas
   ctx.fillStyle = "rgba(30, 41, 59, 0.85)";
   ctx.strokeStyle = "#00f2fe";
   platforms.forEach(p => {
@@ -389,7 +410,6 @@ function draw() {
     ctx.strokeRect(p.x, p.y, p.w, p.h);
   });
 
-  // Llave
   if (keyItem && !keyItem.collected) {
     ctx.fillStyle = "#ff007f";
     ctx.shadowBlur = 10; ctx.shadowColor = "#ff007f";
@@ -397,23 +417,19 @@ function draw() {
     ctx.shadowBlur = 0;
   }
 
-  // Puerta de salida
   ctx.fillStyle = player.hasKey ? "#38ef7d" : "#ef4444";
   ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
   ctx.fillRect(door.x, door.y, door.w, door.h);
   ctx.shadowBlur = 0;
 
-  // Enemigos
-  ctx.fillStyle = "#ff007f";
   enemies.forEach(e => {
+    ctx.fillStyle = "#ff007f";
     ctx.fillRect(e.x, e.y, e.w, e.h);
   });
 
-  // Jefe y Jugador
   drawBoss();
   drawPlayer();
 
-  // HUD / Interfaz
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 14px 'Segoe UI'";
   ctx.fillText(`NIVEL: ${currentLevel}`, 20, 30);
