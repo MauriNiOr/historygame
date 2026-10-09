@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atheria: Escape del Núcleo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background-color: #050811;
+      color: #fff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      border: 4px solid #00f2fe;
+      box-shadow: 0 0 25px rgba(0, 242, 254, 0.4);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    canvas { background: #0b0f19; display: block; }
+    .ui-layer {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(5, 8, 17, 0.85);
+      backdrop-filter: blur(4px);
+    }
+    h1 {
+      font-size: 38px;
+      color: #00f2fe;
+      text-shadow: 0 0 10px #00f2fe;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    p {
+      font-size: 16px;
+      color: #94a3b8;
+      max-width: 500px;
+      text-align: center;
+      margin-bottom: 25px;
+      line-height: 1.5;
+    }
+    button {
+      padding: 12px 30px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #050811;
+      background: #00f2fe;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      box-shadow: 0 0 15px #00f2fe;
+      transition: all 0.2s ease;
+    }
+    button:hover {
+      background: #38ef7d;
+      box-shadow: 0 0 20px #38ef7d;
+      transform: scale(1.05);
+    }
+    .controls {
+      margin-top: 20px;
+      font-size: 14px;
+      color: #38ef7d;
+      background: rgba(0,0,0,0.5);
+      padding: 10px 20px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="gameCanvas" width="800" height="450"></canvas>
+
+  <!-- Pantalla de Inicio -->
+  <div id="start-screen" class="ui-layer">
+    <h1>ECOS DE ATHERIA</h1>
+    <p>La estación sumergida está colapsando. Recupera las tarjetas de seguridad, elimina a los centinelas de N.E.X.U.S. y llega a la cápsula de escape.</p>
+    <button onclick="startGame()">INICIAR MISIÓN</button>
+    <div class="controls">Controles: [A / D] Moverse | [W / Espacio] Saltar | [J] Atacar</div>
+  </div>
+
+  <!-- Pantalla de Fin/Victoria -->
+  <div id="end-screen" class="ui-layer" style="display: none;">
+    <h1 id="end-title">MISIÓN COMPLETADA</h1>
+    <p id="end-desc">Has destruido a N.E.X.U.S. y escapado con vida de Atheria.</p>
+    <button onclick="restartGame()">JUGAR DE NUEVO</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let gameState = "MENU"; // MENU, PLAYING, WIN, GAMEOVER
+let currentLevel = 1;
+
+// Teclas
+const keys = {};
+window.addEventListener("keydown", e => keys[e.code] = true);
+window.addEventListener("keyup", e => keys[e.code] = false);
+
+// Jugador
+const player = {
+  x: 50, y: 300, w: 24, h: 36,
+  vx: 0, vy: 0,
+  speed: 4, jumpPower: -10,
+  grounded: false,
+  health: 100,
+  attacking: false,
+  attackTimer: 0,
+  hasKey: false
+};
+
+// Configuración de Niveles
+let platforms = [];
+let enemies = [];
+let keyItem = null;
+let door = null;
+let boss = null;
+
+function loadLevel(lvl) {
+  currentLevel = lvl;
+  player.x = 50;
+  player.y = 300;
+  player.vx = 0;
+  player.vy = 0;
+  player.hasKey = false;
+  enemies = [];
+  boss = null;
+
+  if (lvl === 1) {
+    // Nivel 1: Laboratorio de Escape
+    platforms = [
+      { x: 0, y: 410, w: 800, h: 40 },
+      { x: 150, y: 320, w: 120, h: 15 },
+      { x: 340, y: 250, w: 120, h: 15 },
+      { x: 530, y: 180, w: 120, h: 15 }
+    ];
+    keyItem = { x: 580, y: 140, w: 16, h: 16, collected: false };
+    door = { x: 730, y: 330, w: 40, h: 80 };
+    enemies.push({ x: 380, y: 220, w: 24, h: 24, dir: 1, range: [340, 440], speed: 1.5, hp: 30 });
+  } else if (lvl === 2) {
+    // Nivel 2: El Reactor
+    platforms = [
+      { x: 0, y: 410, w: 800, h: 40 },
+      { x: 100, y: 330, w: 100, h: 15 },
+      { x: 260, y: 270, w: 100, h: 15 },
+      { x: 420, y: 210, w: 100, h: 15 },
+      { x: 580, y: 150, w: 100, h: 15 }
+    ];
+    keyItem = { x: 620, y: 110, w: 16, h: 16, collected: false };
+    door = { x: 730, y: 330, w: 40, h: 80 };
+    enemies.push({ x: 280, y: 240, w: 24, h: 24, dir: 1, range: [260, 340], speed: 2, hp: 40 });
+    enemies.push({ x: 440, y: 180, w: 24, h: 24, dir: -1, range: [420, 500], speed: 2, hp: 40 });
+  } else if (lvl === 3) {
+    // Nivel 3: Sala del Jefe
+    platforms = [
+      { x: 0, y: 410, w: 800, h: 40 },
+      { x: 100, y: 280, w: 120, h: 15 },
+      { x: 580, y: 280, w: 120, h: 15 }
+    ];
+    keyItem = null;
+    player.hasKey = true;
+    door = { x: 740, y: 330, w: 40, h: 80 };
+    boss = { x: 550, y: 290, w: 60, h: 80, hp: 150, maxHp: 150, dir: -1, attackCooldown: 0 };
+  }
+}
+
+function startGame() {
+  document.getElementById("start-screen").style.display = "none";
+  document.getElementById("end-screen").style.display = "none";
+  gameState = "PLAYING";
+  player.health = 100;
+  loadLevel(1);
+  requestAnimationFrame(update);
+}
+
+function restartGame() {
+  startGame();
+}
+
+function update() {
+  if (gameState !== "PLAYING") return;
+
+  // --- Movimiento del Jugador ---
+  if (keys["KeyA"] || keys["ArrowLeft"]) player.vx = -player.speed;
+  else if (keys["KeyD"] || keys["ArrowRight"]) player.vx = player.speed;
+  else player.vx = 0;
+
+  if ((keys["KeyW"] || keys["Space"] || keys["ArrowUp"]) && player.grounded) {
+    player.vy = player.jumpPower;
+    player.grounded = false;
+  }
+
+  // Ataque
+  if (keys["KeyJ"] && player.attackTimer <= 0) {
+    player.attacking = true;
+    player.attackTimer = 15;
+  }
+  if (player.attackTimer > 0) {
+    player.attackTimer--;
+    if (player.attackTimer === 0) player.attacking = false;
+  }
+
+  // Gravedad
+  player.vy += 0.5;
+
+  // Posición
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // Limites
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
+
+  // Colisión con Plataformas
+  player.grounded = false;
+  platforms.forEach(p => {
+    if (player.x < p.x + p.w && player.x + player.w > p.x &&
+        player.y + player.h >= p.y && player.y + player.h <= p.y + 15 && player.vy >= 0) {
+      player.y = p.y - player.h;
+      player.vy = 0;
+      player.grounded = true;
+    }
+  });
+
+  // --- Recoger Llave ---
+  if (keyItem && !keyItem.collected) {
+    if (player.x < keyItem.x + keyItem.w && player.x + player.w > keyItem.x &&
+        player.y < keyItem.y + keyItem.h && player.y + player.h > keyItem.y) {
+      keyItem.collected = true;
+      player.hasKey = true;
+    }
+  }
+
+  // --- Entrar por la Puerta ---
+  if (player.hasKey && player.x < door.x + door.w && player.x + player.w > door.x &&
+      player.y < door.y + door.h && player.y + player.h > door.y) {
+    if (currentLevel < 3) {
+      loadLevel(currentLevel + 1);
+    } else if (currentLevel === 3 && (!boss || boss.hp <= 0)) {
+      endGame(true);
+      return;
+    }
+  }
+
+  // --- Enemigos Estándar ---
+  enemies.forEach(e => {
+    e.x += e.speed * e.dir;
+    if (e.x < e.range[0] || e.x + e.w > e.range[1]) e.dir *= -1;
+
+    // Recibir ataque
+    if (player.attacking && Math.abs((player.x + player.w/2) - (e.x + e.w/2)) < 40 &&
+        Math.abs(player.y - e.y) < 30) {
+      e.hp -= 5;
+    }
+
+    // Dañar al jugador
+    if (player.x < e.x + e.w && player.x + player.w > e.x &&
+        player.y < e.y + e.h && player.y + player.h > e.y) {
+      player.health -= 0.5;
+    }
+  });
+  enemies = enemies.filter(e => e.hp > 0);
+
+  // --- Lógica del Jefe ---
+  if (boss && boss.hp > 0) {
+    if (player.attacking && Math.abs((player.x + player.w/2) - (boss.x + boss.w/2)) < 60 &&
+        Math.abs(player.y - boss.y) < 50) {
+      boss.hp -= 1.5;
+    }
+
+    if (player.x < boss.x + boss.w && player.x + player.w > boss.x &&
+        player.y < boss.y + boss.h && player.y + player.h > boss.y) {
+      player.health -= 1;
+    }
+  }
+
+  // Muerte del Jugador
+  if (player.health <= 0) {
+    endGame(false);
+    return;
+  }
+
+  draw();
+  requestAnimationFrame(update);
+}
+
+function draw() {
+  // Limpiar Pantalla
+  ctx.fillStyle = "#0b0f19";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Dibujar Fondo (Líneas futuristas)
+  ctx.strokeStyle = "rgba(0, 242, 254, 0.05)";
+  for(let i=0; i<canvas.width; i+=40) {
+    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i, canvas.height); ctx.stroke();
+  }
+
+  // Plataformas
+  ctx.fillStyle = "#1e293b";
+  ctx.strokeStyle = "#00f2fe";
+  platforms.forEach(p => {
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.strokeRect(p.x, p.y, p.w, p.h);
+  });
+
+  // Llave / Tarjeta de acceso
+  if (keyItem && !keyItem.collected) {
+    ctx.fillStyle = "#ff007f";
+    ctx.shadowBlur = 10; ctx.shadowColor = "#ff007f";
+    ctx.fillRect(keyItem.x, keyItem.y, keyItem.w, keyItem.h);
+    ctx.shadowBlur = 0;
+  }
+
+  // Puerta de Salida
+  ctx.fillStyle = player.hasKey ? "#38ef7d" : "#ef4444";
+  ctx.shadowBlur = 10; ctx.shadowColor = ctx.fillStyle;
+  ctx.fillRect(door.x, door.y, door.w, door.h);
+  ctx.shadowBlur = 0;
+
+  // Enemigos
+  ctx.fillStyle = "#ff007f";
+  enemies.forEach(e => {
+    ctx.fillRect(e.x, e.y, e.w, e.h);
+  });
+
+  // Jefe Final
+  if (boss && boss.hp > 0) {
+    ctx.fillStyle = "#a855f7";
+    ctx.shadowBlur = 15; ctx.shadowColor = "#a855f7";
+    ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
+    ctx.shadowBlur = 0;
+
+    // Barra Vida Jefe
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(200, 20, 400, 15);
+    ctx.fillStyle = "#a855f7";
+    ctx.fillRect(200, 20, (boss.hp / boss.maxHp) * 400, 15);
+  }
+
+  // Jugador
+  ctx.fillStyle = "#00f2fe";
+  ctx.shadowBlur = 10; ctx.shadowColor = "#00f2fe";
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+  ctx.shadowBlur = 0;
+
+  // Ataque de espada
+  if (player.attacking) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(player.x + player.w, player.y + 10, 20, 10);
+  }
+
+  // Interfaz (HUD)
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "14px 'Segoe UI'";
+  ctx.fillText(`NIVEL: ${currentLevel}`, 20, 30);
+  ctx.fillText(`SALUD: ${Math.max(0, Math.ceil(player.health))}%`, 100, 30);
+  ctx.fillText(`TARJETA: ${player.hasKey ? "CONSEGUIDA" : "BUSCAR"}`, 220, 30);
+}
+
+function endGame(won) {
+  gameState = won ? "WIN" : "GAMEOVER";
+  const screen = document.getElementById("end-screen");
+  const title = document.getElementById("end-title");
+  const desc = document.getElementById("end-desc");
+
+  if (won) {
+    title.innerText = "¡MISIÓN COMPLETADA!";
+    title.style.color = "#38ef7d";
+    desc.innerText = "Has derrotado a N.E.X.U.S. y escapado de las profundidades de Atheria.";
+  } else {
+    title.innerText = "MISIÓN FALLIDA";
+    title.style.color = "#ef4444";
+    desc.innerText = "Tu traje espacial colapsó. Las instalaciones te han engullido.";
+  }
+  screen.style.display = "flex";
+}
+</script>
+</body>
+</html>
